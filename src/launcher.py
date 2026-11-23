@@ -29,6 +29,120 @@ _VENV_CANDIDATES = (
 )
 
 
+# ---------------------------------------------------------------- 解释器探测
+
+# 微软商店的 App Execution Alias 是 0 字节占位符，执行会返回 9009。
+# 很多 Windows 机器上 "python" 命令正指向它，因此不能假设 python 一定可用。
+def is_usable_python(path: Path) -> bool:
+    """判断给定路径是否是真正可执行的 Python（排除占位符与缺失文件）。"""
+    try:
+        if not path.is_file():
+            return False
+        # 0 字节 = 商店占位符
+        if path.stat().st_size == 0:
+            return False
+        # 实际跑一次 --version 最可靠（同时能排除损坏的安装）
+        result = subprocess.run(
+            [str(path), "--version"],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
+def _which_all(name: str) -> list[Path]:
+    """返回 PATH 中所有名为 name 的可执行文件（按 PATH 顺序）。"""
+    import shutil
+
+    found: list[Path] = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        for suffix in ("", ".exe", ".cmd", ".bat"):
+            candidate = Path(entry) / (name + suffix)
+            if candidate.is_file():
+                found.append(candidate)
+    if not found:
+        single = shutil.which(name)
+        if single:
+            found.append(Path(single))
+    return found
+
+
+def find_python_candidates() -> list[Path]:
+    """按优先级收集本机可用的 Python 解释器，供创建 venv 使用。
+
+    顺序：
+    1. 当前进程的解释器（sys.executable）—— 最可靠，正在跑就一定能用
+    2. py launcher 能报告的真实安装（`py -0p`）
+    3. PATH 中的 python / python3
+    4. conda 常见安装位置
+    5. uv 托管的解释器
+    """
+    candidates: list[Path] = []
+
+    def add(p: Path | str | None) -> None:
+        if not p:
+            return
+        path = Path(p)
+        if path not in candidates:
+            candidates.append(path)
+
+    # 1) 当前解释器优先
+    add(sys.executable)
+
+    # 2) py launcher（Windows 特有，能列出真实安装）
+    for py_name in ("py",):
+        for py_exe in _which_all(py_name):
+            try:
+                out = subprocess.run(
+                    [str(py_exe), "-0p"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                ).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for line in out.splitlines():
+                # 形如 " -V:3.12 *        C:\Path\to\python.exe"
+                if ".exe" in line.lower():
+                    tail = line.split()[-1]
+                    if tail.lower().endswith(".exe"):
+                        add(tail)
+
+    # 3) PATH 中的 python / python3
+    for name in ("python", "python3"):
+        for p in _which_all(name):
+            add(p)
+
+    # 4) conda 常见位置
+    home = Path.home()
+    for base in (
+        home / "anaconda3",
+        home / "miniconda3",
+        Path("C:/ProgramData/anaconda3"),
+        Path("C:/ProgramData/miniconda3"),
+    ):
+        add(base / "python.exe")
+
+    # 5) uv 托管的解释器
+    uv_dir = Path.home() / "AppData" / "Roaming" / "uv" / "python"
+    if uv_dir.is_dir():
+        for exe in sorted(uv_dir.glob("*/python.exe")):
+            add(exe)
+
+    # 过滤：只保留真正可执行的
+    return [p for p in candidates if is_usable_python(p)]
+
+
+def find_usable_python() -> Path | None:
+    """返回第一个可用的 Python 解释器；一个都没有则返回 None。"""
+    candidates = find_python_candidates()
+    return candidates[0] if candidates else None
+
+
 def project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -56,6 +170,7 @@ def decide_startup_action(
     has_venv_python: bool,
     force_no_pygame: bool,
     requirements_present: bool,
+    has_usable_python: bool = True,
 ) -> str:
     """纯函数：决定启动策略。返回值见下方 DOC。
 
@@ -74,15 +189,38 @@ def decide_startup_action(
         return "abort"
     if has_venv_python:
         return "reexec"
+    # 没有可用 Python 时无法创建环境，必须给出"去装 Python"的提示
+    if not has_usable_python:
+        return "abort"
     return "create_venv"
 
 
-def manual_instructions(root: Path) -> str:
-    """给用户可直接复制粘贴的命令（使用绝对路径）。"""
+def manual_instructions(root: Path, no_python: bool = False) -> str:
+    """给用户可直接复制粘贴的命令（使用绝对路径）。
+
+    no_python=True 时说明本机根本没有可用的 Python，需先安装。
+    """
     exe = find_venv_python(root)
     venv_py = str(exe) if exe else str(Path(root) / ".venv" / "Scripts" / "python.exe")
     req = str(Path(root) / "requirements.txt")
     main_py = str(Path(root) / "main.py")
+
+    if no_python:
+        return (
+            "未找到可用的 Python，无法自动准备运行环境。\n\n"
+            "请先安装 Python 3.12（任选其一）：\n\n"
+            "  方式 1（推荐）：访问 https://www.python.org/downloads/ 下载安装，\n"
+            "                  安装时务必勾选 \"Add python.exe to PATH\"。\n"
+            "  方式 2：用 Microsoft Store 搜索 \"Python 3.12\" 安装。\n"
+            "  方式 3：已有 conda 的话执行：conda create -n flappy python=3.12\n\n"
+            "注意：Windows 上如果 \"python\" 命令提示找不到（退出码 9009），\n"
+            "      通常是「应用执行别名」占位符，去 设置 → 应用 → 高级应用设置 →\n"
+            "      应用执行别名，关闭 python.exe 的别名，或用上面的方式重装。\n\n"
+            "安装完成后重新运行：\n\n"
+            f'  cd "{root}"\n'
+            f'  python "{main_py}"\n'
+        )
+
     return (
         "无法自动准备运行环境，请手动执行以下命令（可直接复制）：\n\n"
         f'  cd "{root}"\n'
@@ -159,11 +297,13 @@ def ensure_environment(root: Path, argv: list[str]) -> int | None:
     返回 None 表示"当前解释器可用，继续运行"；返回 int 表示"已处理完毕，用该退出码退出"。
     """
     force_no_pygame = os.environ.get(_GUARD_ENV) == "1"
+    usable_python = find_usable_python()
     action = decide_startup_action(
         has_pygame=has_pygame(),
         has_venv_python=find_venv_python(root) is not None,
         force_no_pygame=force_no_pygame,
         requirements_present=(Path(root) / "requirements.txt").is_file(),
+        has_usable_python=usable_python is not None,
     )
 
     if action == "run":
@@ -180,5 +320,5 @@ def ensure_environment(root: Path, argv: list[str]) -> int | None:
             return _reexec_into(exe, root, argv)
         print("[启动器] 自动创建环境失败。\n")
 
-    print(manual_instructions(root))
+    print(manual_instructions(root, no_python=usable_python is None))
     return c.EXIT_ENV_ERROR

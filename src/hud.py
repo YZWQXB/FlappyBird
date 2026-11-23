@@ -6,18 +6,13 @@ from . import config as c
 from .assets import AssetManager
 
 
-def number_width(hud: "Hud", value: int) -> int:
-    if value <= 0:
-        return 0
-    widths = [hud.assets.digit(int(ch)).get_width() for ch in str(value)]
-    return sum(widths) + c.DIGIT_GAP * (len(widths) - 1)
-
-
 class Hud:
     def __init__(self, assets: AssetManager) -> None:
         self.assets = assets
         self._font_cache: dict[tuple[int, bool], pygame.font.Font] = {}
         self._outline_cache: dict[tuple[str, int, tuple], pygame.Surface] = {}
+        # 是否全部字体都走了回退路径（pygame 2.6.1 + Py3.12 的 SysFont 缺陷所致）
+        self.font_fallback: bool = False
 
     # --- 字体（必须容忍 pygame 2.6.1 的 SysFont 缺陷）---
     def get_font(self, size: int, bold: bool = True) -> pygame.font.Font:
@@ -29,7 +24,10 @@ class Hud:
                     ("consolas", "couriernew", "monospace"), size, bold=bold
                 )
             except (TypeError, OSError, AttributeError, pygame.error):
+                # pygame 2.6.1 在 win32 下的 initsysfonts 缺陷：splitext 收到 int，
+                # 任何字体名都会抛 TypeError。回退到内置字体并记录状态。
                 font = pygame.font.Font(None, size)
+                self.font_fallback = True
             self._font_cache[key] = font
         return font
 
@@ -60,6 +58,13 @@ class Hud:
         return rect
 
     # --- 数字 ---
+    def number_width(self, value: int) -> int:
+        """数字条总宽度（含字间距）。0 或负数宽度为 0。"""
+        if value <= 0:
+            return 0
+        widths = [self.assets.digit(int(ch)).get_width() for ch in str(value)]
+        return sum(widths) + c.DIGIT_GAP * (len(widths) - 1)
+
     def draw_number(
         self,
         surface: pygame.Surface,
@@ -77,7 +82,7 @@ class Hud:
             return
         value = max(0, value)
         digits = str(value)
-        total = number_width(self, value)
+        total = self.number_width(value)
         x = (x_center if x_center is not None else c.LOGICAL_W // 2) - total // 2
         for ch in digits:
             glyph = self.assets.digit(int(ch))

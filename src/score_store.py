@@ -16,16 +16,23 @@ class HighScoreStore:
         self.best = self.load()
 
     def load(self) -> int:
+        # 文件不存在是正常首次运行，不告警
+        if not self.path.exists():
+            return 0
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
+            print(f"[score_store] 存档读取失败，按 0 处理：{exc}")
             return 0
         if not isinstance(raw, dict):
+            print("[score_store] 存档格式非法（非对象），按 0 处理")
             return 0
         value = raw.get("best_score")
         if isinstance(value, bool) or not isinstance(value, int):
+            print("[score_store] 存档 best_score 类型非法，按 0 处理")
             return 0
         if not 0 <= value < _MAX_REASONABLE:
+            print("[score_store] 存档 best_score 超出合理范围，按 0 处理")
             return 0
         return value
 
@@ -40,7 +47,8 @@ class HighScoreStore:
             return self.best
         if score <= self.best:
             return self.best
-        self.best = score
+        # 先写盘、成功后才升级内存。否则写盘失败时本局会显示"新纪录"，
+        # 重启后又回退，用户观感是"最高分丢了"。
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(self.path.suffix + ".tmp")
@@ -51,4 +59,6 @@ class HighScoreStore:
             os.replace(tmp, self.path)
         except OSError as exc:
             print(f"[score_store] 最高分写入失败（本次不保留）：{exc}")
+            return self.best
+        self.best = score
         return self.best

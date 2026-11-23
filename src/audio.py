@@ -24,6 +24,17 @@ def sfx_gap_ok(name: str, now_ms: float, last_ms: float | None) -> bool:
     return (now_ms - last_ms) >= c.SFX_PRIORITY_GAP_MS
 
 
+def priority_gap_ok(now_ms: float, last_ms: float | None) -> bool:
+    """hit 与 die 之间的共享间隔判定（跨音效名）。
+
+    Spec FR-AUDIO-4 要求"die 与 hit 至少间隔 200ms"。二者是不同音效名，
+    各自计时无法互相约束，因此需要一条共享的时间线。
+    """
+    if last_ms is None:
+        return True
+    return (now_ms - last_ms) >= c.SFX_PRIORITY_GAP_MS
+
+
 class AudioManager:
     """音效门面：所有失败路径降级为空操作，绝不向调用方抛异常。"""
 
@@ -35,6 +46,7 @@ class AudioManager:
         self._sounds: dict[str, pygame.mixer.Sound] = {}
         self._channels: list[pygame.mixer.Channel] = []
         self._last_play_ms: dict[str, float] = {}
+        self._last_priority_ms: float | None = None   # hit/die 共享时间线
 
     @classmethod
     def disabled(cls) -> "AudioManager":
@@ -73,6 +85,11 @@ class AudioManager:
         now_ms = pygame.time.get_ticks()
         if not sfx_gap_ok(name, now_ms, self._last_play_ms.get(name)):
             return
+        # hit/die 走同一条时间线，保证二者间隔 >= SFX_PRIORITY_GAP_MS
+        if name in _GAP_LIMITED:
+            if not priority_gap_ok(now_ms, self._last_priority_ms):
+                return
+            self._last_priority_ms = now_ms
         try:
             self._last_play_ms[name] = now_ms
             index = self.RESERVED.get(name)

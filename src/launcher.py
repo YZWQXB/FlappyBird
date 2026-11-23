@@ -16,10 +16,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from . import config as c
+
 # 环境变量守卫：防止在 .venv 里仍缺 pygame 时无限自我重启
 _GUARD_ENV = "FLAPPYBIRD_LAUNCHER_REEXEC"
 # 开发/测试用：跳过 pygame 检查并直接进入游戏
-_SMOKE_ENV = "FLAPPYBIRD_SMOKE_FRAMES"
+SMOKE_FRAMES_ENV = "FLAPPYBIRD_SMOKE_FRAMES"
 
 _VENV_CANDIDATES = (
     Path(".venv") / "Scripts" / "python.exe",      # Windows
@@ -104,7 +106,7 @@ def _reexec_into(exe: Path, root: Path, args: list[str]) -> int:
         return subprocess.call(cmd, cwd=str(root), env=env)
     except OSError as exc:
         print(f"[启动器] 切换失败：{exc}")
-        return 2
+        return c.EXIT_ENV_ERROR
 
 
 def _create_venv(root: Path) -> Path | None:
@@ -179,4 +181,4 @@ def ensure_environment(root: Path, argv: list[str]) -> int | None:
         print("[启动器] 自动创建环境失败。\n")
 
     print(manual_instructions(root))
-    return 2
+    return c.EXIT_ENV_ERROR

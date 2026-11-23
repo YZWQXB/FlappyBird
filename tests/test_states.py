@@ -70,12 +70,22 @@ def fake_game_factory(assets):
 # ---------- READY ----------
 
 def test_ready_to_playing_on_space(fake_game_factory):
+    """READY 按空格 → PLAYING，且起飞时给鸟初速（审查缺陷 S1）。"""
     game = fake_game_factory()
     from src.states.ready import ReadyState
+    from src.states.playing import PlayingState
 
+    # FakeGame.set_state 只记录名字；这里补一个真实 state，模拟 Game 的行为
     state = ReadyState(game)
+
+    def fake_set_state(name, obj=None):
+        game.state_name = name
+        game.state = obj if obj is not None else PlayingState(game)
+
+    game.set_state = fake_set_state
     state.handle_key(pygame.K_SPACE)
     assert game.state_name == StateName.PLAYING
+    assert game.state.bird.vy == pytest.approx(c.FLAP_VELOCITY), "起飞应获得初速"
 
 
 def test_ready_ignores_other_keys(fake_game_factory):

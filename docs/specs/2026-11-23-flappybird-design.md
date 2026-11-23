@@ -1,8 +1,12 @@
 # FlappyBird（Python / pygame 复刻）需求与设计文档
 
-- 版本：v1.0（需求冻结）
+- 版本：**v1.1**（已实现并同步）
 - 日期：2026-11-23
-- 状态：待用户评审（blocking questions 为空，评审通过后即可进入实施计划）
+- 状态：**已实现**（168 → 184 个测试全绿，覆盖率 89%）
+
+> **v1.1 修订说明**：本版在 v1.0 需求冻结后经历了两轮实际开发与一次代码审查，Spec 已回溯同步到真实实现。
+> 主要变更：非对称重力手感（附录 A.4b）、窗口倍率自适应（FR-WIN-1）、图标改为可选资源（FR-WIN-3）、旋转角度分段映射（FR-PHYS-8）、音效共享间隔（FR-AUDIO-4b）、存档写盘一致性（FR-STORE-4b）。
+> 每处变更均标注了 `> v1.1` 说明与原因，便于追溯。
 - 项目根目录：`E:\AI study\homework\FlappyBird`
 - 资源根目录：`res/`（素材已就位，本方案只使用、不修改）
 
@@ -65,9 +69,12 @@
 
 ### 6.1 FR-WIN 窗口、渲染与主循环
 
-- **FR-WIN-1** 逻辑分辨率 `288×512`，窗口 `LOGICAL_W × SCALE`，默认 `SCALE = 2` → `576×1024`。
+- **FR-WIN-1** 逻辑分辨率 `288×512`；窗口尺寸 = 逻辑尺寸 × **实际可用整数倍率**（`display.fit_scale()` 计算）。
+
+  > **v1.1 变更**：原 v1.0 固定 `SCALE = 2`（576×1024），但实测开发机桌面可用区为 1707×1019，1024+标题栏放不下。现改为启动时取「能放下的最大整数倍」：本机 1×（288×512），1080p 以上可 2×。`config.SCALE` 降为**首选上限**，`config.FORCE_SCALE` 可强制覆盖。
+  > 因此 §9.2 的「禁用窗口自适应」条款作废，改为「整数倍自适应，禁止非整数缩放」。
 - **FR-WIN-2** 渲染策略：所有绘制在 `288×512` 的 `pygame.Surface`（逻辑画布）上完成，最后 `transform.scale` 到窗口并 `blit`。代码内的坐标、速度、尺寸**一律为逻辑像素**。
-- **FR-WIN-3** 窗口标题 `FlappyBird`；窗口图标使用 `res/images/flappy.ico`（先 `pygame.image.load` 转 Surface，失败则用默认图标，不崩溃）。
+- **FR-WIN-3** 窗口标题 `FlappyBird`；窗口图标使用 `res/images/flappy.ico`。**图标属于可选资源**（`assets.OPTIONAL_SPECS`）：缺失或损坏时打印一行提示并回退默认图标，**不抛 AssetError、不影响启动**。
 - **FR-WIN-4** 主循环：`clock.tick(60)` 限帧；使用累加器 `acc += min(frame_dt, 0.25)`，每次消耗 `FIXED_DT = 1/60` 步进一次 `update(dt)`；渲染每帧一次。单帧最多补 5 步，防“死亡螺旋”。
 - **FR-WIN-5** 关闭窗口（`QUIT`）或按 `ESC` 立即退出并保存（若有必要）；退出码 0。
 - **FR-WIN-6** 禁止在游戏以外的路径写文件；唯一写入点为存档（见 FR-STORE）。
@@ -78,9 +85,12 @@
 - `SPACE`：READY 起飞 / PLAYING 扇翅膀 / GAMEOVER 重开。
 - `R`：GAMEOVER 重开（与 SPACE 等价）。
 - `P`：PLAYING ⇄ PAUSED 切换（其他状态忽略）。
-- `M`：静音开关（任意状态生效，屏幕角落显示 `MUTE` 提示 1.5s）。
+- `M`：静音开关（**任意状态生效**，屏幕**右上角**显示 `MUTE` 提示 1.5s，**仅静音时显示**）。
+  > **v1.1 实现**：M 键在 `Game.handle_events` 层统一拦截，因此 5 个状态全部生效；状态层**不得**再处理 `K_m`（否则双次切换等于没切，有测试守护）。
+  > 原实现居中显示于 y=488（压地面带），且未静音时显示 `SOUND ON`；现改为右上角且只在静音时出现。
 - `ESC`：退出程序。
-- 只响应 `KEYDOWN`，长按不连发（避免“按住空格无敌”）；`pygame.key.set_repeat(0)`。
+- 只响应 `KEYDOWN`，长按不连发（避免「按住空格无敌」）。
+  > **v1.1 实现说明**：pygame **默认即为不重复**（`set_repeat` 默认关闭），因此代码中不显式调用 `pygame.key.set_repeat(0)`；行为符合要求，仅省略了冗余调用。若日后有人开启 repeat，需补回该调用。
 
 ### 6.3 FR-STATE 状态机
 
@@ -89,7 +99,7 @@
 | 迁移 | 触发条件 | 动作 |
 |---|---|---|
 | 启动 → READY | 程序启动 | 播 `swoosh`，鸟在中间上下浮动，地面滚动，`message.png` 显示 |
-| READY → PLAYING | `SPACE` | 播 `wing`，鸟获得起跳初速，管道开始生成，`message.png` 淡出 |
+| READY → PLAYING | `SPACE` | 播 `wing`，鸟获得起跳初速（`vy = FLAP_VELOCITY`），管道开始生成，`message.png` 消失 |
 | PLAYING → PAUSED | `P` | 冻结所有更新（含鸟、管道、地面、音效播放），覆盖 `PAUSED` 遮罩 |
 | PAUSED → PLAYING | `P` | 恢复；累加器清零避免一次性补步 |
 | PLAYING → DYING | 任一碰撞（FR-PHYS-5） | 播 `hit`，停止计分，鸟进入自由落体并旋转；管道/地面停止左移 |
@@ -130,7 +140,18 @@
   命中任一 → `DYING`。
 - **FR-PHYS-6** hitbox：小鸟精灵 34×24，内缩 3px → 逻辑尺寸 **28×18**，以精灵中心对齐。碰撞使用 AABB（`pygame.Rect`），**不使用 mask 逐像素检测**（可测、开销低；像素级容错通过内缩实现）。
 - **FR-PHYS-7** 计分判定：管道以 `pipe.x + PIPE_W <= bird.hitbox.x` 首次成立且该管道 `scored == False` 时，`score += 1`、播 `point`、置 `scored = True`。
-- **FR-PHYS-8** 精灵视觉旋转（仅 PLAYING/DYING）：角度由 `vy` 线性映射，`vy = FLAP_VELOCITY(-380)` → `-25°`，`vy >= 400` → `+90°`，中间线性插值；旋转只影响绘制，不影响 hitbox。可用 `ROTATE_SPRITE` 开关关闭。
+- **FR-PHYS-8** 精灵视觉旋转（**仅 PLAYING/DYING 生效**）：角度由 `vy` 分段映射，旋转只影响绘制，不影响 hitbox。可用 `ROTATE_SPRITE` 开关关闭。
+
+| vy 区间 | 角度 | 含义 |
+|---|---|---|
+| `vy <= FLAP_VELOCITY(-380)` | `-25°` | 起跳瞬间仰头 |
+| `FLAP_VELOCITY < vy < 0` | `-25° → 0°` 线性 | 上升中回正 |
+| `0 <= vy <= ROTATE_VY_LEVEL(120)` | **`0°`（水平）** | 顶点与待机 |
+| `ROTATE_VY_LEVEL < vy < ROTATE_VY_FULL(400)` | `0° → 90°` 线性 | 开始俯冲 |
+| `vy >= 400` | `+90°` | 急坠 |
+
+  > **v1.1 修复**：原实现用 `FLAP_VELOCITY↔400` 单段线性插值，导致 `rotation_for(0) = 31°`——顶点和 READY 待机的鸟都低头 31°（肉眼可见的姿态错误）。现增加水平区段，`rotation_for(0) = 0°`。
+  > **READY 不旋转**：待机时固定 `0°`，不调用 `rotation_for`。
 
 ### 6.5 FR-DIFF 难度曲线（阶梯式）
 
@@ -152,6 +173,7 @@
 - **FR-THEME-1** `stage = score // 10`（0 起）；背景：`stage % 2 == 0` → `background-day.png`，否则 `background-night.png`。
 - **FR-THEME-2** 小鸟配色：`palette = stage % 3` → 0 黄(`yellowbird-*`)、1 蓝(`bluebird-*`)、2 红(`redbird-*`)。
 - **FR-THEME-3** 背景与配色变化**在跨过 10 分的那一刻瞬时生效**，不插值、不闪屏；同一帧内背景与鸟色同步切换（两者由同一个 `stage` 派生，天然一致）。
+  > **v1.1 修复**：`PlayingState.update` 必须先**计分**再**按新分数推导 stage**。原实现顺序相反，导致跨过 10 分的那一步会渲染出「10 分 + 白天」的一帧（16.7ms 闪烁）。
 - **FR-THEME-4** 组合周期为 `lcm(2,3) = 6` 个 stage（60 分）后完全回到初始外观。
 - **FR-THEME-5** 昼夜与配色状态在 READY/重开时归零（day + 黄鸟）。
 
@@ -163,12 +185,15 @@
 | 得分 | `point` | 分数 +1 |
 | 撞击 | `hit` | 进入 DYING 的瞬间 |
 | 坠落触地 | `die` | DYING 中小鸟落地瞬间（与 hit 至少间隔 200ms） |
-| 界面切换 | `swoosh` | 进入 READY（启动/重开）、进入 GAMEOVER |
+| 界面切换 | `swoosh` | 进入 **GAMEOVER**（结算）、进入 READY（启动）；重开时只播一次（由 ReadyState.enter 负责） |
 
 - **FR-AUDIO-1** 加载优先级：同名 `.wav` 存在则用 `.wav`，否则回退 `.ogg`；两者都缺 → 该音效记为静音条目，不抛异常。
 - **FR-AUDIO-2** 初始化：`pygame.mixer.pre_init(44100, -16, 2, 512)` 后 `pygame.mixer.init()`；任一步抛异常（无声卡/远程桌面/驱动缺失）→ `AudioManager` 进入**禁用模式**，所有 `play()` 为空操作，游戏完整可玩。
 - **FR-AUDIO-3** 静音：`M` 切换；静音时 `play()` 不发声但事件与逻辑不受影响；静音状态**不持久化**（重启恢复有声）。
-- **FR-AUDIO-4** 通道规划：预留 8 个通道；`die`/`hit` 走固定通道并 `stop()` 前一声，避免叠音爆音；`wing`/`point` 走自动分配通道。
+- **FR-AUDIO-4** 通道规划：预留 8 个通道；`die`/`hit`/`swoosh` 走**固定通道**（0/1/2）并 `stop()` 前一声，避免叠音爆音；`wing`/`point` 走自动分配通道。
+
+  - **FR-AUDIO-4b**（v1.1 新增）`hit` 与 `die` 共享**同一条时间线**：二者距上次播放均需 ≥ `SFX_PRIORITY_GAP_MS(200)`，由 `audio.priority_gap_ok()` 判定。
+    > 原实现按音效名各自计时，而 hit/die 是两个不同名字，互不约束，Spec 的「至少间隔 200ms」从未生效。
 - **FR-AUDIO-5** 暂停时不主动停止已在播放的音效（音效都很短，<1s）；恢复后不补播。
 
 ### 6.8 FR-SCORE 计分与 HUD
@@ -176,7 +201,11 @@
 - **FR-SCORE-1** 当前分数用数字精灵 `0.png`–`9.png` 渲染（`1.png` 宽 16，其余 24），顶部水平居中，`y = 44`，数字间距 1px。
 - **FR-SCORE-2** 分数为 0 时不显示（与原版一致），≥1 时显示；不补前导零。
 - **FR-SCORE-3** PLAYING / PAUSED / DYING 状态均显示当前分数（暂停时分数保持可见）。
-- **FR-SCORE-4** HUD 文字（`PAUSED`、`PRESS SPACE`、`BEST`、`MUTE`）使用 `pygame.font.SysFont("consolas,couriernew,monospace", size, bold=True)`，16px（标题 20px）；字体缺失回退 `pygame.font.Font(None, size)`。**HUD 文案一律英文大写**，避免中文字形缺失。
+- **FR-SCORE-4** HUD 文字（`PAUSED`、`PRESS SPACE`、`BEST`、`MUTE`）使用等宽粗体，16px（标题 20px）。**HUD 文案一律英文大写**，避免中文字形缺失。
+
+  > **v1.1 已知限制**：pygame 2.6.1 + Python 3.12 在 Windows 下的 `sysfont.initsysfonts_win32` 有缺陷（`splitext` 收到 int），**任何 `SysFont` 入参都会抛 `TypeError`**。因此实际恒定回退到 `Font(None, size)`（内置 freesansbold）。
+  > 代码通过 `Hud.font_fallback` 暴露该状态，并用 `try/except (TypeError, OSError, AttributeError, pygame.error)` 兜底。**等宽粗体的视觉契约在当前 pygame 版本下达不到**，属环境限制而非实现缺陷。
+  > 若需真正等宽字体，应随项目附带 `.ttf` 并用 `pygame.font.Font(path, size)` 加载。
 
 ### 6.9 FR-STORE 最高分持久化
 
@@ -184,6 +213,9 @@
 - **FR-STORE-2** 结构：`{"version": 1, "best_score": 0}`；读取时校验类型与范围（int，`0 <= best < 10^6`），不合法按 0 处理。
 - **FR-STORE-3** 写策略：仅当 `score > best` 时在进入 GAMEOVER 时写一次；**原子写**（先写 `highscore.json.tmp` 再 `os.replace`），避免断电产生半文件。
 - **FR-STORE-4** 任何读写异常（权限拒绝、磁盘满、JSON 损坏、目录不存在）→ 记录一次 `print` 警告，按 best=0 继续，绝不崩溃。存档失败不影响游戏流程。
+
+  - **FR-STORE-4b**（v1.1 补充）**写盘失败时内存中的 best 不得升级**：先写盘、成功后才赋值。否则本局会显示「新纪录」，重启后又回退，用户观感是「最高分丢了」。
+  - 文件**不存在**属正常首次运行，不告警；其余读失败（损坏/类型非法/超范围）均打印原因。
 - **FR-STORE-5** 启动时读取一次并缓存到内存；GAMEOVER 界面显示 `BEST`（本次刷新后立即显示新值）。
 
 ### 6.10 FR-SCREEN 画面与各状态视觉
@@ -227,14 +259,21 @@
 - **FR-SCREEN-1** 遮罩/文字必须使用 `SRCALPHA` 临时 Surface，不修改主画布 alpha。
 - **FR-SCREEN-2** 窗口缩放在 `blit` 前完成（`transform.scale` 每帧一次到预分配的窗口 Surface），不做逐对象缩放。
 - **FR-SCREEN-3** 场景中不出现任何中文字符渲染（资源无中文字体）。
+- **FR-SCREEN-4**（v1.1）布局坐标统一收敛到 `config.py`（`READY_MSG_Y`、`PAUSED_TITLE_Y`、`PAUSED_HINT_Y`、`BEST_LABEL_OFFSET`、`MUTE_BADGE_X/Y` 等），状态层**不得**出现裸像素值。
 
 ### 6.11 FR-ASSET 资源加载契约
 
 - **FR-ASSET-1** 资源根路径由 `Path(__file__).resolve().parents[1] / "res"` 推导，**与当前工作目录无关**（从任意目录启动都能找到资源）。
-- **FR-ASSET-2** 启动时一次性预加载全部图片到 `dict[str, Surface]`，键名统一小写下划线（`bird_yellow_mid` 等）；游戏循环中**不得**出现 `pygame.image.load`。
+- **FR-ASSET-2** 启动时一次性预加载全部图片到 `dict[str, Surface]`，键名统一小写下划线（`bird_yellow_mid` 等）；游戏循环中**不得**出现 `pygame.image.load`（唯一允许位置是 `assets.py` 的加载函数）。
 - **FR-ASSET-3** 必须跳过并忽略 `res/__MACOSX/`（不遍历、不加载、不校验）。
 - **FR-ASSET-4** 缺图片 → 启动阶段抛 `AssetError` 并给出**具体缺失文件名**的可读报错 + 退出码 2（图片缺失属不可降级的致命错误；音效缺失不致命）。
-- **FR-ASSET-5** 图片统一转 `convert_alpha()`（需先 `set_mode`）；数字与管道图像额外缓存常用旋转/翻转结果，避免每帧 `transform`。
+
+  - **例外（v1.1）**：`flappy.ico` 属**可选资源**（`OPTIONAL_SPECS`），缺失只打印一行 `[assets] 可选资源缺失，已忽略` 并回退默认图标，**不触发 AssetError**。
+  - **尺寸校验（v1.1）**：清单中的 `size` 若与实际不符，打印 `[assets] 尺寸不符：<文件名> 实际 WxH 清单 WxH` 后按实际尺寸绘制，不致命。
+- **FR-ASSET-5** 图片统一转 `convert_alpha()`（需先 `set_mode`）；管道与小鸟的常用派生帧必须缓存，避免每帧 `transform`：
+  - `pipe_cap(facing_up)` → 按朝向缓存 2 个；
+  - `pipe_body(height, facing_up)` → 按 `(高度, 朝向)` 缓存，上限 256 条；
+  - `rotated_bird(palette, flap, degrees)` → 按 `(帧索引, 整数角度)` 缓存，上限 `ROTATE_CACHE_MAX`；缓存键用 `palette * len(FLAP_NAMES) + flap`，**禁止硬编码帧数**（否则新增帧会与既有组合静默碰撞）。
 
 ## 7. 资源组织与使用规划（res/ 清单）
 
@@ -313,6 +352,8 @@ FlappyBird/
 ├── src/
 │   ├── __init__.py
 │   ├── config.py               # 唯一常量源：尺寸/物理/难度/颜色/路径/文案
+│   ├── launcher.py             # 启动器：自动切换/创建运行环境（v1.1 新增）
+│   ├── display.py              # 窗口倍率自适应 fit_scale()（v1.1 新增）
 │   ├── assets.py               # AssetManager + 资源清单 + AssetError
 │   ├── audio.py                # AudioManager（回退/静音/禁用模式）
 │   ├── physics.py              # 纯函数：integrate_step / clamp / 碰撞 AABB / 计分判定
@@ -350,6 +391,8 @@ FlappyBird/
 | 模块 | 职责 | 依赖 | 明确不负责 |
 |---|---|---|---|
 | `config` | 全部可调常量与文案 | 无 | 无逻辑 |
+| `launcher` | 运行环境探测/切换/创建、退出码约定 | 标准库（subprocess/shutil），不 import pygame | 不含游戏逻辑 |
+| `display` | 整数倍率计算、窗口创建 | pygame, config | 不做状态管理 |
 | `assets` | 加载/缓存/键名映射/派生帧 | pygame, config | 不碰游戏状态 |
 | `audio` | 音效播放、静音、失败降级 | pygame.mixer, assets 的 Sound 对象 | 不决定“何时播” |
 | `physics` | 积分、钳制、AABB 相交、越界判定 | 无（纯数据，允许传入 Rect 样元组） | 不持有 pygame.Surface |
@@ -368,40 +411,78 @@ LOGICAL_W, LOGICAL_H = 288, 512
 SCALE = 2
 FPS = 60
 FIXED_DT = 1 / 60
-GRAVITY = 1500.0          # px/s^2
-FLAP_VELOCITY = -380.0    # px/s  → hop ≈ 48px，滞空 ≈ 0.5s
-MAX_FALL_SPEED = 640.0    # px/s
-HOP = FLAP_VELOCITY**2 / (2 * GRAVITY)   # 派生量，仅供自洽校验
+GRAVITY = 1500.0            # px/s^2 上升段基准重力
+FLAP_VELOCITY = -380.0      # px/s
+MAX_FALL_SPEED = 480.0      # px/s 终端下落速度
+GRAVITY_FALL_SCALE = 0.65   # 下降段重力系数
+HANG_VY_THRESHOLD = 120.0   # 顶点滞空过渡区阈值
+HANG_GRAVITY_SCALE = 0.35   # 顶点处重力系数
+HOP = FLAP_VELOCITY**2 / (2 * GRAVITY)   # 派生量，仅供红线校验
 BASE_SPEED = 120.0        # px/s
 BASE_GAP, MIN_GAP, GAP_STEP = 110, 80, 5
 LEVEL_EVERY, MAX_LEVEL, SPEED_STEP = 5, 6, 0.08
-PIPE_W, PIPE_CAP_H, PIPE_SPACING, PIPE_MARGIN, MAX_CENTER_DELTA = 52, 25, 150, 48, 120
-LAND_Y = 400
+PIPE_W, PIPE_H, PIPE_CAP_H = 52, 320, 25
+PIPE_SPACING, PIPE_MARGIN, MAX_CENTER_DELTA = 150, 48, 120
+LAND_Y, LAND_H, LAND_TILE_W = 400, 112, 336
 BIRD_X, BIRD_Y0, BIRD_W, BIRD_H, BIRD_INSET = 64, 256, 34, 24, 3
 THEME_EVERY = 10
+
+# 旋转（分段映射，见 FR-PHYS-8）
+ROTATE_MIN_DEG, ROTATE_MAX_DEG = -25.0, 90.0
+ROTATE_VY_LEVEL, ROTATE_VY_FULL = 120.0, 400.0
+
+# 布局（状态层不得出现裸像素）
+SCORE_Y, READY_MSG_Y = 44, 96
+PAUSED_TITLE_Y, PAUSED_HINT_Y = 220, 256
+SCORE_PANEL_Y, BEST_PANEL_Y, BEST_LABEL_OFFSET = 210, 284, 26
+MUTE_BADGE_X, MUTE_BADGE_Y = LOGICAL_W - 34, 12
+
+# 退出码
+EXIT_OK, EXIT_ASSET_ERROR, EXIT_DISPLAY_ERROR, EXIT_ENV_ERROR = 0, 2, 3, 4
 
 # difficulty.py  —— 纯函数，无副作用
 def level_for(score: int) -> int: ...
 def speed_for(level: int) -> float: ...
 def gap_for(level: int) -> int: ...
+def gap_band(gap: float) -> tuple[float, float]: ...
 def next_gap_center(prev_center: float, gap: int, rng: random.Random) -> float: ...
 
-# physics.py —— 纯函数，输入/输出均为不可变数据
+# physics.py —— 纯函数，不 import pygame
+def gravity_for(vy: float) -> float: ...          # 非对称重力曲线
 def integrate(vy: float, y: float, dt: float) -> tuple[float, float]: ...
 def clamp_vy(vy: float) -> float: ...
-def hitbox(x: float, y: float) -> tuple[float, float, float, float]: ...
-def overlap(a: RectLike, b: RectLike) -> bool: ...
-def is_dead(box: RectLike, pipes: Sequence[PipeGeom], land_y: float) -> bool: ...
-def should_score(pipe_x: float, pipe_w: float, bird_left: float) -> bool: ...
+def hitbox(x: float, y: float) -> tuple[int, int, int, int]: ...
+def pipe_boxes(pipe: PipeGeom, land_y: float) -> tuple[Box, Box]: ...
+def overlaps(a: Box, b: Box) -> bool: ...
+def is_dead(box: Box, pipes: Sequence[PipeGeom], land_y: float) -> bool: ...
+def should_score(pipe_x: float, bird_left: float) -> bool: ...
+def rotation_for(vy: float) -> float: ...          # 分段映射
+def jump_feel_metrics(steps: int = 900) -> dict[str, float]: ...   # 手感度量
 
 # assets.py
 class AssetError(RuntimeError): ...
+IMAGE_SPECS: tuple[ImageSpec, ...]                 # 必需资源（缺一即 fatal）
+OPTIONAL_SPECS: tuple[ImageSpec, ...]              # 可选资源（如 icon）
 class AssetManager:
     def __init__(self, res_root: Path) -> None: ...
     images: dict[str, Surface]
-    def bird_frames(self, palette: int) -> tuple[Surface, Surface, Surface]: ...
-    def pipe_body(self, color: str, height: int) -> Surface: ...
-    def digit(self, d: int) -> Surface: ...
+    def image(self, key: str) -> Surface: ...
+    def optional_image(self, key: str) -> Surface | None: ...
+    def digit(self, value: int) -> Surface: ...
+    def bird_frame(self, palette: int, flap: int) -> Surface: ...
+    def rotated_bird(self, palette: int, flap: int, degrees: float) -> Surface: ...
+    def pipe_cap(self, facing_up: bool) -> Surface: ...
+    def pipe_body(self, height: int, facing_up: bool) -> Surface: ...
+
+# launcher.py（v1.1 新增，不 import pygame）
+def decide_startup_action(*, has_pygame, has_venv_python, force_no_pygame, requirements_present) -> str: ...
+def ensure_environment(root: Path, argv: list[str]) -> int | None: ...
+def manual_instructions(root: Path) -> str: ...
+
+# display.py（v1.1 新增）
+def fit_scale(avail_w: int, avail_h: int, preferred: int = SCALE, force: int = FORCE_SCALE) -> int: ...
+def query_desktop_size() -> tuple[int, int]: ...
+def init_window(screen_size: tuple[int, int] | None = None) -> tuple[Surface, int]: ...
 
 # audio.py
 class AudioManager:
@@ -429,7 +510,8 @@ class HighScoreStore:
 
 - 画布固定 288×512，纵向四段：**状态区**（0–400，游戏区）、**地面**（400–512）、**分数带**（y=44 顶部居中）、**提示带**（y=460 底部居中）。
 - 3×3 分区原则：分数永远在顶部中线，提示永远在底部中线，主体玩法永远在中间，不随状态跳动位置。
-- 2 倍整数缩放，禁用非整数缩放与窗口自适应（避免像素糊）。
+- **整数倍缩放**（1× 或 2×，由 `fit_scale()` 决定），禁用非整数缩放（避免像素糊）。
+  > v1.1 更正：原「禁用窗口自适应」已作废，详见 FR-WIN-1 的 v1.1 变更说明。
 
 ### 9.3 Visual System
 
@@ -638,15 +720,76 @@ FlappyBird 的"难"应当来自玩家反应与节奏控制，而不是来自**�
 
 **为什么不用"跳跃后短暂无重力"或"悬停计时器"**：那会做成"按一下飘 0.3 秒"的发木手感，且输入响应不连续。这里保持纯粹的**速度-加速度关系**——顶点附近重力小 → 自然飘一下，一旦开始下落重力迅速恢复 → 保留"重力感"。玩家补跳的响应始终是即时的。
 
-**为什么同时降低终端速度**：只改顶点滞空解决不了"从高处坠落时太快"的问题。两处配合才能既飘得起来又落得下去。
 
-**红线复核**：`净空 62 ≥ 1.25×hop(57.8)` ✓、`DWELL/CROSS 1.277 ≥ 1.25` ✓、各难度爬升窗口充足 ✓（level 6 合并后 0.84 s 窗口，补 120 px 仅需 0.59 s）。
+---
 
-**关于 bot 验证的再次说明**：本轮又尝试了带目标偏移的穿越 bot，新旧参数下通过率均为 0%。这**再次印证** A.4 的结论——固定阈值 bot 无法代表人类（单次跳跃期间无法反向修正），**不能用作手感判据**。本次改用手感指标 + 物理可达性分析替代。
+## 附录 B：实施状态与审查修复记录（v1.1）
 
-### A.5 调参红线（写进 README 与单测）
+### B.1 交付状态
 
-1. 修改 `GRAVITY / FLAP_VELOCITY / MIN_GAP` 任一值 → 必须重算 `DWELL/CROSS` 并保持 ≥ 1.25；
-2. `MIN_GAP − HITBOX_H ≥ 1.25 × HOP`（与 A.2 等价的简化式，当前 62 ≥ 60.2 ✓）；
-3. `BASE_GAP > MIN_GAP`，且 `speed_for(MAX_LEVEL) ≤ 1.6 × BASE_SPEED`；
-4. 所有派生量由 `config.py` 计算导出，**禁止在代码里散落新的魔法数**。
+| 指标 | 值 |
+|---|---|
+| 生产代码 | 23 文件 / 约 1700 行 |
+| 测试 | **184 个用例全绿** |
+| 覆盖率 | **89%**（physics/difficulty/hud/background/ground/bird/playing 均 100%） |
+| 素材体检 | PASS（27 图 + 5 音效，忽略 `__MACOSX` 39 文件） |
+| 手感红线 | PASS（净空 62 ≥ 1.25×hop、DWELL/CROSS = 1.277 ≥ 1.25） |
+| 仓库 | https://github.com/YZWQXB/FlappyBird（`main`） |
+
+### B.2 两轮代码审查的修复对照
+
+第一轮（实施计划验收）修复了 11 个缺陷；第二轮（两轴代码审查）修复了以下项，**每项均有对应回归测试**（`tests/test_review_fixes.py`，16 个用例按缺陷编号组织）：
+
+| 编号 | 问题 | 修复方式 | 回归测试 |
+|---|---|---|---|
+| **S1** | READY→PLAYING 无起跳初速、无 wing 音效，按空格瞬间鸟直接下坠 | `ReadyState.handle_key` 播 wing 后调用 `begin_takeoff()`，把 `bird.flap()` 放在 `enter()` 之后 | `test_S1_*` ×3 |
+| **B1** | 存档写盘失败时内存 best 已升级 → 本局显示新纪录、重启回退 | `save_if_better` 改为**写盘成功后才赋值** | `test_B1_*` ×2 |
+| **S13** | `rotation_for(0) = 31°`，顶点与待机鸟低头 | 改为分段映射，新增 `ROTATE_VY_LEVEL` 水平区段；`rotation_for(0) = 0°` | `test_S13_*` ×3 |
+| **S14** | 主题切换比计分晚一步，跨 10 分时闪「10 分+白天」一帧 | `update` 内**先计分、再推导 stage** | `test_S14_*` |
+| **S4** | 缺 `flappy.ico` 抛 AssetError（违反 FR-WIN-3） | 新增 `OPTIONAL_SPECS`，图标改为可选 | `test_S4_*` |
+| **S5** | READY 状态翅膀动画冻结 | 抽出 `Bird.update_animation()`，READY 也调用 | `test_S5_*` |
+| **S2** | GAMEOVER 未播 swoosh（位置颠倒） | `GameOverState.enter` 播 swoosh；重开时不重复播 | `test_S2_*` |
+| **S3** | hit/die 的 200ms 间隔从不生效（各自计时） | 新增 `priority_gap_ok()` 共享时间线 | 手工验证 |
+| **S7** | 存档读失败静默返回 0 | 分类打印原因（不存在/损坏/类型非法/超范围） | `test_S7_*` |
+| **S8** | `ImageSpec.size` 定义未用 | `_try_load` 校验尺寸并打印警告 | `test_S8_*` |
+| **S17** | 字体回退状态不可观测 | `Hud.font_fallback` 暴露状态 | `test_S17_*` |
+| **S18** | MUTE 角标居中压地面带，且未静音时显示 SOUND ON | 移到右上角（`MUTE_BADGE_X/Y`），仅静音时显示 | `test_S18_*` |
+| **B3** | 管道派生帧每帧重建 | `pipe_cap`/`pipe_body` 加缓存 | 手工验证 |
+| **B4** | 缓存键硬编码 `3` | 改用 `len(FLAP_NAMES)` | — |
+
+### B.3 Standards 轴结构性重构
+
+| 编号 | 重构 | 效果 |
+|---|---|---|
+| #1 | `IMAGE_SPECS` 尺寸改为引用 `config` 常量 | 改窗口/鸟尺寸不再需要同步两处 |
+| #2 | 布局魔法数收进 config（`READY_MSG_Y`/`PAUSED_TITLE_Y`/`PAUSED_HINT_Y`/`BEST_LABEL_OFFSET`/`MUTE_BADGE_*`） | 调版式只改一个文件 |
+| #3 | `Bird.__init__` 复用 `reset()` | 消除 8 行重复 |
+| #4 | 抽出 `State.draw_world()` | 消除三处「背景→管道→鸟→地面」重复 |
+| #7 | 新增 `PipePair.geom()` | 不再手工拼几何三元组 |
+| #8 | `State.exit()` 在 `set_state` 中真正调用 | 基类契约完整 |
+| #10 | `number_width` 收为 `Hud` 方法 | 消除伪自由函数 |
+| #12 | 启动器退出码改用 `EXIT_ENV_ERROR=4` | 与 `EXIT_ASSET_ERROR=2` 语义分离 |
+
+### B.4 仍存在的已知限制（不修复，需记录）
+
+| 项 | 原因 | 影响 |
+|---|---|---|
+| `SysFont` 恒回退 | pygame 2.6.1 + Py3.12 在 Windows 的 `sysfont` 缺陷 | HUD 用内置 freesansbold，非等宽粗体；不影响可读性 |
+| 等差管道速度冻结 | 设计取舍（FR-DIFF-1 要求既有管道不变速） | 升级瞬间新旧管道速度不同，视觉上略有差异 |
+| `Game.run()` 为阻塞循环 | 便于简单实现 | 主循环本身不可单测，靠 `draw_frame`/`handle_events` 拆分覆盖 |
+
+### B.5 测试清单（184 个）
+
+| 文件 | 用例数 | 守护内容 |
+|---|---|---|
+| `test_feel.py` | 14 | 非对称重力曲线、顶点滞空、手感下限 |
+| `test_physics.py` | 7 | 积分、钳制、旋转映射 |
+| `test_collision.py` | 9 | hitbox、三种死亡、计分时机 |
+| `test_difficulty.py` | 15 | 阶梯函数、缝隙中心钳制 |
+| `test_tuning_invariant.py` | 5 | 调参红线 |
+| `test_entities.py` | 15 | 鸟/管道/地面/背景/HUD 渲染 |
+| `test_states.py` | 18 | 五态迁移、暂停、重开重置 |
+| `test_review_fixes.py` | 16 | **两轴审查的修复回归** |
+| `test_regressions.py` | 24 | 第一轮缺陷回归 |
+| `test_launcher.py` | 20 | 启动器决策矩阵与执行路径 |
+| `test_assets.py`/`test_audio.py`/`test_score_store.py`/`test_config.py`/`test_display.py` | 41 | 资源、音效、存档、配置、倍率 |

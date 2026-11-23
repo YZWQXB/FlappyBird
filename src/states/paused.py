@@ -27,5 +27,7 @@ class PausedState(State):
     def draw(self, surface: pygame.Surface) -> None:
         self.snapshot.draw(surface)
         self.game.hud.overlay(surface)
-        self.game.hud.draw_text(surface, "PAUSED", c.FONT_LARGE, 220)
-        self.game.hud.draw_text(surface, "PRESS P TO RESUME", c.FONT_SMALL, 256)
+        self.game.hud.draw_text(surface, "PAUSED", c.FONT_LARGE, c.PAUSED_TITLE_Y)
+        self.game.hud.draw_text(
+            surface, "PRESS P TO RESUME", c.FONT_SMALL, c.PAUSED_HINT_Y
+        )

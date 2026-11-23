@@ -205,7 +205,9 @@ def test_reexec_returns_error_when_exec_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher.subprocess, "call", boom)
     exe = tmp_path / "python.exe"
     exe.write_text("", encoding="utf-8")
-    assert launcher._reexec_into(exe, tmp_path, []) == 2
+    from src import config as c
+
+    assert launcher._reexec_into(exe, tmp_path, []) == c.EXIT_ENV_ERROR
 
 
 def test_create_venv_uses_uv_first(monkeypatch, tmp_path):
@@ -293,10 +295,11 @@ def test_ensure_environment_reexecs_when_venv_present(monkeypatch, tmp_path):
 
 
 def test_ensure_environment_aborts_without_requirements(monkeypatch, tmp_path):
+    from src import config as c
     from src import launcher
 
     monkeypatch.setattr(launcher, "has_pygame", lambda: False)
-    assert launcher.ensure_environment(tmp_path, []) == 2
+    assert launcher.ensure_environment(tmp_path, []) == c.EXIT_ENV_ERROR
 
 
 def test_ensure_environment_aborts_under_guard(monkeypatch, tmp_path):
@@ -308,5 +311,7 @@ def test_ensure_environment_aborts_under_guard(monkeypatch, tmp_path):
     monkeypatch.setenv(launcher._GUARD_ENV, "1")
     called = []
     monkeypatch.setattr(launcher, "_reexec_into", lambda *a: called.append(1) or 0)
-    assert launcher.ensure_environment(tmp_path, []) == 2
+    from src import config as c
+
+    assert launcher.ensure_environment(tmp_path, []) == c.EXIT_ENV_ERROR
     assert called == []

@@ -35,7 +35,7 @@ def main() -> int:
 
         print(f"依赖缺失：{exc}\n")
         print(manual_instructions(project_root()))
-        return c.EXIT_ASSET_ERROR
+        return c.EXIT_ENV_ERROR
 
     # 3) 初始化并运行
     try:
@@ -49,7 +49,9 @@ def main() -> int:
         print(f"启动失败：{exc}")
         return c.EXIT_DISPLAY_ERROR
 
-    smoke_frames = os.environ.get("FLAPPYBIRD_SMOKE_FRAMES")
+    from src.launcher import SMOKE_FRAMES_ENV
+
+    smoke_frames = os.environ.get(SMOKE_FRAMES_ENV)
     max_frames = int(smoke_frames) if smoke_frames and smoke_frames.isdigit() else None
     return game.run(max_frames=max_frames)
 

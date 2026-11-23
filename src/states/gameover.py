@@ -15,14 +15,15 @@ class GameOverState(State):
         self.best = 0
 
     def enter(self) -> None:
+        # Spec FR-AUDIO: 进入 GAMEOVER 播 swoosh
+        self.game.audio.play("swoosh")
         self.final_score = self.game.score
         self.best = self.game.best
 
     def handle_key(self, key: int) -> None:
         if key in (pygame.K_SPACE, pygame.K_r):
-            self.game.audio.play("swoosh")
             self.game.reset_round()
-            self.game.set_state(StateName.READY)
+            self.game.set_state(StateName.READY)   # ReadyState.enter 会播 swoosh
 
     def update(self, dt: float) -> None:
         pass
@@ -48,6 +49,8 @@ class GameOverState(State):
         msg = self.game.assets.image("msg_gameover")
         surface.blit(msg, ((c.LOGICAL_W - msg.get_width()) // 2, c.GAMEOVER_IMG_Y))
         hud.draw_number(surface, self.final_score, c.SCORE_PANEL_Y, allow_zero=True)
-        hud.draw_text(surface, "BEST", c.FONT_SMALL, c.BEST_PANEL_Y - 26)
+        hud.draw_text(
+            surface, "BEST", c.FONT_SMALL, c.BEST_PANEL_Y - c.BEST_LABEL_OFFSET
+        )
         hud.draw_number(surface, self.best, c.BEST_PANEL_Y, allow_zero=True)
         hud.draw_text(surface, "PRESS SPACE TO RESTART", c.FONT_SMALL, c.HINT_Y)

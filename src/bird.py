@@ -15,13 +15,7 @@ FLAP_CYCLE = (1, 2, 1, 0)
 class Bird:
     def __init__(self, assets: AssetManager) -> None:
         self.assets = assets
-        self.x = float(c.BIRD_X)
-        self.y = float(c.BIRD_Y0)
-        self.vy = 0.0
-        self.palette = 0
-        self.flap_index = FLAP_CYCLE[0]
-        self._anim_t = 0.0
-        self._cycle_pos = 0
+        self.reset()
 
     def reset(self) -> None:
         self.x = float(c.BIRD_X)
@@ -38,13 +32,17 @@ class Bird:
     def set_stage(self, stage: int) -> None:
         self.palette = stage % len(c.PALETTE_ORDER)
 
-    def update(self, dt: float) -> None:
-        self.vy, self.y = integrate(self.vy, self.y, dt)
+    def update_animation(self, dt: float) -> None:
+        """只推进翅膀帧动画，不做物理积分（READY 待机用）。"""
         self._anim_t += dt
         while self._anim_t >= c.FLAP_FRAME_TIME:
             self._anim_t -= c.FLAP_FRAME_TIME
             self._cycle_pos = (self._cycle_pos + 1) % len(FLAP_CYCLE)
             self.flap_index = FLAP_CYCLE[self._cycle_pos]
+
+    def update(self, dt: float) -> None:
+        self.vy, self.y = integrate(self.vy, self.y, dt)
+        self.update_animation(dt)
 
     def float_motion(self, elapsed: float) -> None:
         """READY 待机：正弦上下浮动，不参与物理。"""

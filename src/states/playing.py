@@ -33,6 +33,14 @@ class PlayingState(State):
         self.bird.set_stage(self.stage)
         self.ground.reset()
 
+    def begin_takeoff(self) -> None:
+        """起飞瞬间给鸟一个向上的初速（READY -> PLAYING 专用）。
+
+        enter() 会把鸟 reset 到 vy=0，所以必须在 enter 之后调用，
+        否则玩家按下空格的瞬间看不到任何向上的反馈，鸟直接下坠。
+        """
+        self.bird.flap()
+
     def handle_key(self, key: int) -> None:
         if key == pygame.K_SPACE:
             self.bird.flap()
@@ -62,20 +70,21 @@ class PlayingState(State):
 
         self.ground.update(dt, speed)
 
-        new_stage = self.game.score // c.THEME_EVERY
-        if new_stage != self.stage:
-            self.stage = new_stage
-            self.background.set_stage(self.stage)
-            self.bird.set_stage(self.stage)
-
+        # 先计分，再按新分数推导主题 —— 否则跨过 10 分的那一步会渲染出
+        # 「10 分 + 白天」的一帧（Spec FR-THEME-3 要求同帧生效）
         bird_left = self.bird.box[0]
         for pipe in self.pipes:
             if pipe.try_score(bird_left):
                 self.game.score += 1
                 self.game.audio.play("point")
 
-        geoms = [(p.x, p.center, p.gap) for p in self.pipes]
-        if is_dead(self.bird.box, geoms, c.LAND_Y):
+        new_stage = self.game.score // c.THEME_EVERY
+        if new_stage != self.stage:
+            self.stage = new_stage
+            self.background.set_stage(self.stage)
+            self.bird.set_stage(self.stage)
+
+        if is_dead(self.bird.box, [p.geom() for p in self.pipes], c.LAND_Y):
             from .dying import DyingState
 
             self.game.audio.play("hit")
@@ -84,9 +93,4 @@ class PlayingState(State):
             )
 
     def draw(self, surface: pygame.Surface) -> None:
-        self.background.draw(surface)
-        for pipe in self.pipes:
-            pipe.draw(surface, self.game.assets)
-        self.bird.draw(surface)
-        self.ground.draw(surface)
-        self.game.hud.draw_score(surface, self.game.score)
+        self.draw_world(surface, pipes=self.pipes, bird=self.bird, with_score=True)

@@ -39,15 +39,13 @@ class DyingState(State):
         box = self.bird.box
         if box[1] + box[3] >= c.LAND_Y:
             self.landed = True
+            # save_if_better 写盘失败时返回旧值，game.best 因此不会被虚高
             self.game.best = self.game.store.save_if_better(self.game.score)
             self.game.audio.play("die")
             # 不传实例：交给 Game 构建并执行 enter()，以捕获本局分数与 best
             self.game.set_state(StateName.GAMEOVER)
 
     def draw(self, surface: pygame.Surface) -> None:
-        self.game.background.draw(surface)
-        for pipe in self.pipes:
-            pipe.draw(surface, self.game.assets)
-        self.bird.draw(surface)
-        self.ground.draw(surface)
-        self.game.hud.draw_score(surface, self.game.score)
+        self.draw_world(
+            surface, pipes=self.pipes, bird=self.bird, with_score=True
+        )

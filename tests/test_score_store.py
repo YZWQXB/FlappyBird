@@ -59,6 +59,11 @@ def test_creates_missing_parent_dir(tmp_path):
 
 
 def test_unwritable_dir_does_not_raise(tmp_path, monkeypatch):
+    """写盘失败：不抛异常，且内存 best 不被污染（审查缺陷 B1）。
+
+    旧断言是 save_if_better(7) == 7，那正是 B1 缺陷：写盘失败却仍升级内存，
+    导致本局显示新纪录、重启后回退。现要求失败时保持旧值。
+    """
     path = tmp_path / "highscore.json"
 
     def boom(*args, **kwargs):
@@ -66,4 +71,5 @@ def test_unwritable_dir_does_not_raise(tmp_path, monkeypatch):
 
     monkeypatch.setattr("builtins.open", boom)
     store = HighScoreStore(path)
-    assert store.save_if_better(7) == 7      # 内存值仍返回，不抛异常
+    assert store.save_if_better(7) == 0      # 返回旧 best，不抛异常
+    assert store.best == 0                   # 内存未被污染

@@ -7,7 +7,7 @@ from src.assets import AssetManager
 from src.background import Background
 from src.bird import Bird
 from src.ground import Ground
-from src.hud import Hud, number_width
+from src.hud import Hud
 from src.pipe import PipePair
 
 
@@ -132,11 +132,11 @@ def test_background_selects_by_stage(assets):
 
 def test_number_width_accounts_for_narrow_one(assets):
     hud = Hud(assets)
-    assert number_width(hud, 0) == 0
-    assert number_width(hud, 1) == 16
-    assert number_width(hud, 10) == 16 + c.DIGIT_GAP + 24
-    assert number_width(hud, 11) == 16 + c.DIGIT_GAP + 16
-    assert number_width(hud, 123) == 16 + c.DIGIT_GAP + 24 + c.DIGIT_GAP + 24
+    assert hud.number_width(0) == 0
+    assert hud.number_width(1) == 16
+    assert hud.number_width(10) == 16 + c.DIGIT_GAP + 24
+    assert hud.number_width(11) == 16 + c.DIGIT_GAP + 16
+    assert hud.number_width(123) == 16 + c.DIGIT_GAP + 24 + c.DIGIT_GAP + 24
 
 
 def test_hud_draws_zero_as_nothing(assets):

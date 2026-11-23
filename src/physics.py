@@ -91,14 +91,28 @@ def should_score(pipe_x: float, bird_left: float) -> bool:
 
 
 def rotation_for(vy: float) -> float:
-    """vy → 精灵视觉角度（仅绘制用，不影响 hitbox）。"""
+    """vy → 精灵视觉角度（仅绘制用，不影响 hitbox）。
+
+    三段映射，保证"顶点/待机时水平朝前"：
+    - vy <= FLAP_VELOCITY       → ROTATE_MIN_DEG（起跳瞬间仰头）
+    - FLAP_VELOCITY < vy < 0    → 从仰头线性过渡到水平
+    - 0 <= vy <= ROTATE_VY_LEVEL → 保持水平（0°）—— 顶点与待机都落在这里
+    - ROTATE_VY_LEVEL < vy      → 从水平线性过渡到 ROTATE_MAX_DEG（俯冲）
+    """
     if vy <= c.FLAP_VELOCITY:
         return c.ROTATE_MIN_DEG
+    if vy < 0.0:
+        # 上升段：从仰头回到水平
+        span = 0.0 - c.FLAP_VELOCITY
+        t = (vy - c.FLAP_VELOCITY) / span
+        return c.ROTATE_MIN_DEG + (0.0 - c.ROTATE_MIN_DEG) * t
+    if vy <= c.ROTATE_VY_LEVEL:
+        return 0.0
     if vy >= c.ROTATE_VY_FULL:
         return c.ROTATE_MAX_DEG
-    span = c.ROTATE_VY_FULL - c.FLAP_VELOCITY
-    t = (vy - c.FLAP_VELOCITY) / span
-    return c.ROTATE_MIN_DEG + (c.ROTATE_MAX_DEG - c.ROTATE_MIN_DEG) * t
+    span = c.ROTATE_VY_FULL - c.ROTATE_VY_LEVEL
+    t = (vy - c.ROTATE_VY_LEVEL) / span
+    return c.ROTATE_MAX_DEG * t
 
 
 # ---------------------------------------------------------------- 手感度量

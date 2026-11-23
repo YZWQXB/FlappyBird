@@ -47,7 +47,11 @@ FLAP_FRAME_TIME = 0.1         # 翅膀帧切换间隔 s
 ROTATE_SPRITE = True
 ROTATE_MIN_DEG = -25.0
 ROTATE_MAX_DEG = 90.0
+# 速度 → 角度的映射区间。vy=0（顶点/待机）应接近水平，
+# 因此把"水平"锚定在 ROTATE_VY_LEVEL 上，而不是简单线性插值到 0。
+ROTATE_VY_LEVEL = 120.0       # vy <= 该值视为水平（0°）
 ROTATE_VY_FULL = 400.0        # vy >= 该值时角度 = ROTATE_MAX_DEG
+ROTATE_BELOW_FULL_DEG = 0.0   # 低于 ROTATE_VY_LEVEL 且仍在上升时的角度
 ROTATE_CACHE_MAX = 160        # 旋转帧缓存上限（防内存增长）
 
 # ---------- 难度 ----------
@@ -61,6 +65,7 @@ MIN_GAP = 80                  # 最窄缝隙
 
 # ---------- 管道与地面 ----------
 PIPE_W = 52
+PIPE_H = 320                  # 管道素材原始高度
 PIPE_CAP_H = 25
 PIPE_BODY_W = 48
 PIPE_BODY_X = 2               # body 相对图片的左偏移
@@ -80,6 +85,13 @@ PALETTE_ORDER = ("yellow", "blue", "red")
 # ---------- HUD ----------
 SCORE_Y = 44
 DIGIT_GAP = 1
+READY_MSG_Y = 96
+MSG_READY_SIZE = (184, 267)
+MSG_GAMEOVER_SIZE = (192, 42)
+DIGIT_W, DIGIT_H = 24, 36
+DIGIT_NARROW_W = 16           # 1.png 的窄字形宽度
+PAUSED_TITLE_Y = 220
+PAUSED_HINT_Y = 256
 HINT_Y = 460
 GAMEOVER_IMG_Y = 140
 # 结算面板（实心底板）几何：覆盖 SCORE 与 BEST 两行
@@ -89,6 +101,7 @@ PANEL_FILL = (0xDE, 0xD8, 0x95)     # 与地面同色系，呼应素材
 PANEL_BORDER = 3
 SCORE_PANEL_Y = 210
 BEST_PANEL_Y = 284
+BEST_LABEL_OFFSET = 26        # "BEST" 标签相对数字的向上偏移
 OVERLAY_ALPHA = 120           # PAUSED 遮罩
 GAMEOVER_OVERLAY_ALPHA = 70   # GAMEOVER 遮罩（更淡，保留现场可见）
 FONT_SMALL = 16
@@ -96,6 +109,8 @@ FONT_LARGE = 20
 INK = (0x54, 0x38, 0x47)
 PAPER = (255, 255, 255)
 MUTE_BADGE_SECONDS = 1.5
+MUTE_BADGE_X = LOGICAL_W - 34   # 右上角
+MUTE_BADGE_Y = 12
 
 # ---------- 音频 ----------
 AUDIO_CHANNELS = 8
@@ -109,3 +124,4 @@ PAUSE_ON_FOCUS_LOST = True
 EXIT_OK = 0
 EXIT_ASSET_ERROR = 2
 EXIT_DISPLAY_ERROR = 3
+EXIT_ENV_ERROR = 4            # 运行环境准备失败（启动器专用，区别于资源错误）

@@ -29,3 +29,20 @@ class State:
 
     def update(self, dt: float) -> None: ...
     def draw(self, surface) -> None: ...
+
+    # --- 共享渲染（消除各状态重复的"背景→管道→地面"序列）---
+    def draw_world(
+        self, surface, *, pipes=(), bird=None, with_score: bool = False
+    ) -> None:
+        """绘制游戏世界：背景 → 管道 → 小鸟 → 地面 →（可选）分数。
+
+        各状态的差异只在"画什么"，不在"怎么画"，因此统一在这里。
+        """
+        self.game.background.draw(surface)
+        for pipe in pipes:
+            pipe.draw(surface, self.game.assets)
+        if bird is not None:
+            bird.draw(surface)
+        self.game.ground.draw(surface)
+        if with_score:
+            self.game.hud.draw_score(surface, self.game.score)

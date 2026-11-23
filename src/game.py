@@ -62,10 +62,13 @@ class Game:
         传入既有实例（暂停恢复）时只挂载、不调用 enter()，否则会重置该状态的
         内部进度（PlayingState.enter 会清空管道并重置鸟的位置）。
         """
+        previous = getattr(self, "state", None)
         if state is None:
             state = self._build_state(name)
             self.state_name = name
             self.state = state
+            if previous is not None and previous is not state:
+                previous.exit()          # 让基类的 exit() 契约真正生效
             state.enter()
         else:
             self.state_name = name
@@ -142,10 +145,12 @@ class Game:
         self.mute_badge_t = max(0.0, self.mute_badge_t - frame_dt)
 
     def draw_mute_badge(self) -> None:
-        if self.mute_badge_t <= 0:
+        """静音角标：仅静音时显示，固定在屏幕右上角（Spec FR-INPUT 行 81）。"""
+        if self.mute_badge_t <= 0 or not self.audio.muted:
             return
-        text = "MUTE" if self.audio.muted else "SOUND ON"
-        self.hud.draw_text(self.canvas, text, c.FONT_SMALL, c.LOGICAL_H - 24)
+        self.hud.draw_text(
+            self.canvas, "MUTE", c.FONT_SMALL, c.MUTE_BADGE_Y, x_center=c.MUTE_BADGE_X
+        )
 
     def draw_frame(self, frame_dt: float = 0.0) -> None:
         self.state.draw(self.canvas)

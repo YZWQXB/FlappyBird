@@ -20,8 +20,12 @@ class PipePair:
     def update(self, dt: float) -> None:
         self.x -= self.speed * dt
 
+    def geom(self) -> tuple[float, float, float]:
+        """几何三元组 (x, center, gap)，供碰撞判定使用（与 physics.PipeGeom 对齐）。"""
+        return (self.x, self.center, self.gap)
+
     def boxes(self) -> tuple[Box, Box]:
-        return pipe_boxes((self.x, self.center, self.gap), c.LAND_Y)
+        return pipe_boxes(self.geom(), c.LAND_Y)
 
     def is_off_screen(self) -> bool:
         return self.x + c.PIPE_W <= 0
